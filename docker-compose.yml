@@ -1,0 +1,196 @@
+include:
+  - airbyte/airbyte-docker-compose.yml
+services:
+  postgres:
+    image: postgres:16
+    container_name: dp_postgres
+    restart: always
+    environment:
+      - POSTGRES_USER=dpuser
+      - POSTGRES_PASSWORD=dppass
+      - POSTGRES_DB=dp_course
+    ports:
+      - "5432:5432"
+    networks:
+      - dp_net
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./postgresql.conf:/etc/postgresql/postgresql.conf
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dpuser -d postgres || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    command: ["-c", "config_file=/etc/postgresql/postgresql.conf"]
+    profiles:
+      - lab3
+      - lab4
+      - lab5
+      - lab6
+      - lab7
+      - lab8
+      - lab9
+      - lab13
+      - lab14
+      - all
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: dp_pgadmin4
+    restart: always
+    ports:
+      - "8888:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: docker@docker.com
+      PGADMIN_DEFAULT_PASSWORD: docker
+    networks:
+      - dp_net
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    profiles:
+      - lab3
+      - lab4
+      - lab5
+      - lab6
+      - lab7
+      - lab8
+      - lab9
+      - lab13
+      - lab14
+      - all
+
+  metabase:
+    image: metabase/metabase
+    container_name: dp_metabase
+    ports:
+      - "3000:3000"
+    depends_on:
+      - postgres
+    networks:
+      - dp_net
+    profiles:
+      - lab3
+      - lab4
+      - lab14
+      - all
+      
+  dbt:
+    image: ghcr.io/dbt-labs/dbt-postgres:1.9.latest
+    container_name: dp_dbt
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./dbt:/usr/app
+      - ./dbt_root:/root/.dbt
+    working_dir: /usr/app
+    entrypoint: [ "/bin/bash", "-c", "tail -f /dev/null" ]
+    depends_on:
+      - postgres
+    networks:
+      - dp_net
+    profiles:
+      - lab5
+
+  gx:
+    build:
+      context: .
+      dockerfile: dockerfile.gx
+    container_name: dp_gx
+    volumes:
+      - ./gx:/workspace/gx
+      - ./gx_scripts:/workspace/gx_scripts
+    environment:
+      - POSTGRES_HOST=dp_postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=dp_core
+      - POSTGRES_USER=dpuser
+      - POSTGRES_PASSWORD=dppass
+    depends_on:
+      - postgres
+    networks:
+      - dp_net
+    profiles:
+      - lab6
+
+  db_init:
+    image: postgres:16
+    container_name: dp_db_init
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: dppass
+    command: >
+      bash -lc "
+      psql -h dp_postgres -U dpuser -d postgres -v ON_ERROR_STOP=1 -c \"CREATE DATABASE airflow ENCODING 'UTF8';\"  || true &&
+      psql -h dp_postgres -U dpuser -d postgres -v ON_ERROR_STOP=1 -c \"CREATE USER airflow WITH PASSWORD 'airflow';\"          || true &&
+      psql -h dp_postgres -U dpuser -d postgres -v ON_ERROR_STOP=1 -c \"GRANT ALL PRIVILEGES ON DATABASE airflow TO airflow;\" || true &&
+      psql -h dp_postgres -U dpuser -d airflow -v ON_ERROR_STOP=1 -c \"ALTER SCHEMA public OWNER TO airflow;\" || true &&
+      echo 'DB init done'
+      "
+    networks:
+      - dp_net
+    restart: "no"
+    profiles:
+      - lab8
+      - lab9
+      - all
+
+  airflow:
+    # image: apache/airflow:2.9.3
+    build:
+      context: .
+      dockerfile: dockerfile.airflow
+    container_name: dp_airflow
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db_init:
+        condition: service_completed_successfully
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@dp_postgres:5432/airflow
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      # (ออปชัน) จูนให้เหมาะกับเครื่องนักศึกษา
+      - AIRFLOW__CORE__PARALLELISM=8
+      - AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG=4
+      - AIRFLOW__SCHEDULER__MAX_THREADS=2
+      - AIRFLOW__EMAIL__EMAIL_BACKEND=airflow.utils.email.send_email_smtp
+      - AIRFLOW__SMTP__SMTP_HOST=sandbox.smtp.mailtrap.io
+      - AIRFLOW__SMTP__SMTP_USER=56b89b7a348d7a
+      - AIRFLOW__SMTP__SMTP_PASSWORD=746aac047c8414
+      - AIRFLOW__SMTP__SMTP_PORT=2525
+      - AIRFLOW__SMTP__SMTP_STARTTLS=True
+      - AIRFLOW__SMTP__SMTP_SSL=False
+      - AIRFLOW__SMTP__SMTP_MAIL_FROM=airflow@example.com
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./dbt:/usr/app
+      - ./dbt_root:/root/.dbt
+      - ./gx:/workspace/gx
+      - ./gx_scripts:/workspace/gx_scripts
+      - ./gx_brazilian:/workspace/gx_brazilian
+    ports:
+      - "18080:8080"
+      - "18081:8081"
+    command: >
+      bash -lc "
+        airflow db init &&
+        airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com &&
+        (airflow webserver & airflow scheduler)"
+    networks:
+      - dp_net
+    profiles:
+      - lab9
+      - all
+
+networks:
+  dp_net:
+
+volumes:
+  pg_data:
+  pgadmin-data:
+  airflow_db_data:
