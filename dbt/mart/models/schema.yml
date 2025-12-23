@@ -1,0 +1,220 @@
+version: 2
+
+sources:
+  - name: core
+    schema: core
+    tables:
+      - name: customers
+      - name: geolocation
+      - name: order_items
+      - name: order_payment
+      - name: order_reviews
+      - name: orders
+      - name: product
+      - name: product_category_translation
+      - name: sellers
+
+models:
+  # -----------------------------------------------------------------
+  # Dimensions (dims)
+  # -----------------------------------------------------------------
+  
+  - name: dim_customer
+    description: "ตารางมิติลูกค้า (Grain: 1 แถว ต่อ 1 customer_unique_id)"
+    columns:
+      - name: customer_key
+        description: "PK (Surrogate Key) สร้างจาก MD5(customer_unique_id)"
+        tests:
+          - unique
+          - not_null
+      - name: customer_unique_id
+        description: "Natural Key ของลูกค้า"
+        tests:
+          - unique
+          - not_null
+      - name: customer_zip_code_prefix
+      - name: customer_city
+      - name: customer_state
+
+  - name: dim_date
+    description: "ตารางมิติเวลา สร้างจากข้อมูลออเดอร์ (Grain: 1 แถว ต่อ 1 วัน)"
+    columns:
+      - name: date_key
+        description: "PK (Surrogate Key) รูปแบบ YYYYMMDD"
+        tests:
+          - unique
+          - not_null
+      - name: date_actual
+      - name: day
+      - name: month
+      - name: year
+      - name: day_name
+      - name: month_name
+      - name: quarter
+      - name: week_of_year
+
+  - name: dim_geolocation
+    description: "ตารางมิติพิกัด (Grain: 1 แถว ต่อ 1 zip_code_prefix, Aggregated)"
+    columns:
+      - name: geolocation_key
+        description: "PK (Surrogate Key) สร้างจาก MD5(geolocation_zip_code_prefix)"
+        tests:
+          - unique
+          - not_null
+      - name: geolocation_zip_code_prefix
+        description: "Natural Key รหัสไปรษณีย์"
+        tests:
+          - unique
+          - not_null
+      - name: geolocation_city
+      - name: geolocation_state
+      - name: avg_latitude
+      - name: avg_longitude
+
+  - name: dim_product
+    description: "ตารางมิติสินค้า พร้อมชื่อหมวดหมู่ภาษาอังกฤษ"
+    columns:
+      - name: product_key
+        description: "PK (Surrogate Key) สร้างจาก MD5(product_id)"
+        tests:
+          - unique
+          - not_null
+      - name: product_id
+        description: "Natural Key ของสินค้า"
+        tests:
+          - unique
+          - not_null
+      - name: product_category_name
+      - name: product_category_name_english
+
+  - name: dim_seller
+    description: "ตารางมิติผู้ขาย (Grain: 1 แถว ต่อ 1 seller_id)"
+    columns:
+      - name: seller_key
+        description: "PK (Surrogate Key) สร้างจาก MD5(seller_id)"
+        tests:
+          - unique
+          - not_null
+      - name: seller_id
+        description: "Natural Key ของผู้ขาย"
+        tests:
+          - unique
+          - not_null
+      - name: seller_city
+      - name: seller_state
+
+  # -----------------------------------------------------------------
+  # Facts (mart_sales / customers / products)
+  # -----------------------------------------------------------------
+
+  - name: fct_customers 
+    description: "ตาราง Fact สรุปพฤติกรรมลูกค้ารายบุคคล (Grain: 1 แถว ต่อ 1 customer_unique_id)"
+    columns:
+      - name: customer_key
+        description: "PK (Surrogate Key) สร้างจาก MD5(customer_unique_id)" # ✅ อัปเดต description
+        tests:
+          - unique # ✅ เพิ่ม test ที่ขาดไป
+          - not_null
+          - relationships:
+              to: ref('dim_customer')
+              field: customer_key
+      - name: first_order_date_key
+        description: "FK วันที่ซื้อครั้งแรก เชื่อมไปยัง dim_date.date_key"
+        tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: last_order_date_key
+        description: "FK วันที่ซื้อครั้งล่าสุด เชื่อมไปยัง dim_date.date_key"
+        tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: customer_zip_code_prefix
+      - name: customer_city
+      - name: customer_state
+      - name: total_orders
+      - name: total_spent
+      - name: total_items_purchased
+      - name: avg_review_score
+      - name: days_since_last_purchase
+
+  - name: fct_sales
+    description: "ตาราง Fact ยอดขาย (Grain: 1 แถว ต่อ 1 order_item)"
+    columns:
+      - name: customer_key
+        description: "FK เชื่อมไปยัง dim_customer.customer_key"
+        tests:
+          # (unique test ถูกลบออกไปแล้ว ซึ่งถูกต้อง)
+          - not_null
+          - relationships:
+              to: ref('dim_customer')
+              field: customer_key
+      - name: product_key
+        description: "FK เชื่อมไปยัง dim_product.product_key"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_product')
+              field: product_key
+      - name: seller_key
+        description: "FK เชื่อมไปยัง dim_seller.seller_key"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_seller')
+              field: seller_key
+      - name: order_date_key
+        description: "FK เชื่อมไปยัง dim_date.date_key"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: order_id
+        description: "Degenerate dimension"
+        tests:
+          - not_null
+      - name: price
+      - name: freight_value
+      - name: total_payment_value
+      - name: avg_review_score
+      - name: order_item_count
+
+  - name: fct_product # ✅ เพิ่มโมเดลใหม่
+    description: "ตาราง Fact วิเคราะห์ประสิทธิภาพสินค้า/ผู้ขาย (Grain: 1 แถว ต่อ 1 order_item)"
+    columns:
+      - name: product_performance_pk
+        description: "PK (Surrogate Key) for this fact table"
+        tests:
+          - unique
+          - not_null
+      - name: product_key
+        description: "FK เชื่อมไปยัง dim_product.product_key"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_product')
+              field: product_key
+      - name: seller_key
+        description: "FK เชื่อมไปยัง dim_seller.seller_key"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_seller')
+              field: seller_key
+      - name: order_date_key
+        description: "FK เชื่อMไปยัง dim_date.date_key"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: order_id
+      - name: product_id
+      - name: seller_id
+      - name: units_sold
+      - name: revenue
+      - name: freight_value
+      - name: shipping_time_days
+
