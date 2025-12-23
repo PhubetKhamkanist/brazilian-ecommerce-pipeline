@@ -13,4 +13,4 @@ An automated data pipeline orchestrated by **Apache Airflow** and containerized 
 * **Reliability:** Automated quality checks eliminated manual data validation[cite: 12].
 
 ## 🛠️ Tech Stack
-[cite_start]Python, SQL, Apache Airflow, dbt, Docker, PostgreSQL, Great Expectations[cite: 10, 30].
+Python, SQL, Apache Airflow, dbt, Docker, PostgreSQL, Great Expectations[cite: 10, 30].
